@@ -3978,6 +3978,7 @@ class Trainer:
             if ("FULL_STATE_DICT" in str(self.accelerator.state.fsdp_plugin.state_dict_type)) and (
                 version.parse(accelerate_version) > version.parse("0.24.1")
             ):
+                print("DEBUG: Saving FSDP full state dict")
                 state_dict = self.accelerator.get_state_dict(self.model)
                 if self.args.should_save:
                     self._save(output_dir, state_dict=state_dict)
@@ -3998,6 +3999,7 @@ class Trainer:
                 self.model_wrapped.save_checkpoint(output_dir)
 
         elif self.args.should_save:
+            print("DEBUG: Saving model without FSDP or DeepSpeed")
             self._save(output_dir)
 
         # Push to the Hub when `save_model` is called by the user.

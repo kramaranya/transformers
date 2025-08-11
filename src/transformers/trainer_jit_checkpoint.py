@@ -28,6 +28,10 @@ class CheckpointManager:
         logger.info("JIT checkpoint signal handler registered for SIGTERM")
 
     def _sigterm_handler(self, signum, frame):
+        if signum != signal.SIGTERM:
+            logger.warning(f"Unexpected signal {signum} received in SIGTERM handler, ignoring")
+            return
+
         if self.checkpoint_requested:
             return
         logger.info(f"SIGTERM received, initiating JIT checkpoint with {self.grace_period}s grace period")
@@ -112,16 +116,17 @@ class CheckpointManager:
             self.trainer._save_checkpoint(self.trainer.model, trial=None)
             self.checkpoint_requested = False
 
-            if self.trainer.is_world_process_zero():
-                run_dir = self.trainer._get_output_dir(trial=None)
-                regular_checkpoint_dir = os.path.join(run_dir, f"checkpoint-{original_step}")
-                jit_checkpoint_dir = os.path.join(run_dir, f"checkpoint-jit-{original_step}")
-
-                if os.path.exists(regular_checkpoint_dir):
-                    os.rename(regular_checkpoint_dir, jit_checkpoint_dir)
-                    logger.info(f"JIT checkpoint saved to {jit_checkpoint_dir}")
-                else:
-                    logger.warning(f"Expected checkpoint directory not found: {regular_checkpoint_dir}")
+            # rename checkpoint folder
+            # if self.trainer.is_world_process_zero():
+            #     run_dir = self.trainer._get_output_dir(trial=None)
+            #     regular_checkpoint_dir = os.path.join(run_dir, f"checkpoint-{original_step}")
+            #     jit_checkpoint_dir = os.path.join(run_dir, f"checkpoint-jit-{original_step}")
+            #
+            #     if os.path.exists(regular_checkpoint_dir):
+            #         os.rename(regular_checkpoint_dir, jit_checkpoint_dir)
+            #         logger.info(f"JIT checkpoint saved to {jit_checkpoint_dir}")
+            #     else:
+            #         logger.warning(f"Expected checkpoint directory not found: {regular_checkpoint_dir}")
 
         except Exception as e:
             logger.error(f"Failed to save JIT checkpoint: {e}")
@@ -148,19 +153,8 @@ class JITCheckpointCallback(TrainerCallback):
 
     def on_pre_optimizer_step(self, args, state, control, **kwargs):
         if self.jit_manager and self.jit_manager.should_checkpoint_now():
-            # try:
-            #     self.jit_manager.execute_jit_checkpoint()
-            # except Exception as e:
-            #     logger.error(f"Error in pre-optimizer step checkpoint: {e}")
-            # finally:
             control.should_training_stop = True
 
     def on_step_end(self, args, state, control, **kwargs):
         if self.jit_manager and self.jit_manager.should_checkpoint_now():
-            # try:
-            #     logger.info("JIT checkpoint triggered at step end")
-            #     self.jit_manager.execute_jit_checkpoint()
-            # except Exception as e:
-            #     logger.error(f"Error in step end checkpoint strategy: {e}")
-            # finally:
             control.should_training_stop = True
