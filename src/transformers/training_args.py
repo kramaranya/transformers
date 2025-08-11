@@ -1000,6 +1000,27 @@ class TrainingArguments:
             )
         },
     )
+    jit_checkpoint_on_sigterm: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to enable Just-In-Time (JIT) checkpointing on SIGTERM signal. "
+                "When enabled, training will checkpoint asynchronously upon receiving SIGTERM, "
+                "allowing for graceful termination without losing progress. "
+                "This is particularly useful for spot instances and preemptible VMs."
+            )
+        },
+    )
+    jit_checkpoint_grace_period: float = field(
+        default=30,
+        metadata={
+            "help": (
+                "Grace period in seconds for JIT checkpointing after receiving SIGTERM. "
+                "Training will attempt to complete the current step and checkpoint within this time. "
+                "If checkpointing takes longer, the process may be forcefully terminated."
+            )
+        },
+    )
     save_safetensors: Optional[bool] = field(
         default=True,
         metadata={
