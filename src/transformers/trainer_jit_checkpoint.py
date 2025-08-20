@@ -1,6 +1,6 @@
-import os
 import signal
 import threading
+import time
 from typing import Optional
 import torch
 from .trainer_callback import TrainerCallback
@@ -28,14 +28,13 @@ class CheckpointManager:
         logger.info("JIT checkpoint signal handler registered for SIGTERM")
 
     def _sigterm_handler(self, signum, frame):
-        if signum != signal.SIGTERM:
-            logger.warning(f"Unexpected signal {signum} received in SIGTERM handler, ignoring")
-            return
-
         if self.checkpoint_requested:
             return
+
         logger.info(f"SIGTERM received, initiating JIT checkpoint with {self.grace_period}s grace period")
         self.checkpoint_requested = True
+        logger.info("Sleeping for 3s to allow checkpointing to start...")
+        time.sleep(3)
         # Start immediate checkpoint in a separate thread
         self.checkpoint_thread = threading.Thread(
             target=self._immediate_async_checkpoint,
@@ -97,21 +96,6 @@ class CheckpointManager:
             # Ensure we're on the checkpoint stream
             assert torch.cuda.current_stream() == self.checkpoint_stream
 
-            # For FSDP models, temporarily set state dict type to avoid FORWARD state issues
-            if hasattr(self.trainer.model, 'fsdp_wrapped_module'):
-                original_state_dict_type = None
-                try:
-                    # Try to get current state dict type
-                    if hasattr(self.trainer.model, 'get_state_dict_type'):
-                        original_state_dict_type = self.trainer.model.get_state_dict_type()
-                        self.trainer.model.set_state_dict_type('LOCAL_STATE_DICT')
-                    elif hasattr(self.trainer.model, 'state_dict_type'):
-                        original_state_dict_type = self.trainer.model.state_dict_type()
-                        self.trainer.model.state_dict_type('LOCAL_STATE_DICT')
-                except Exception as e:
-                    logger.warning(f"Could not set FSDP state dict type: {e}")
-
-
             # Call the trainer's checkpoint method directly
             self.trainer._save_checkpoint(self.trainer.model, trial=None)
             self.checkpoint_requested = False
@@ -146,7 +130,7 @@ class JITCheckpointCallback(TrainerCallback):
         if trainer.args.jit_checkpoint_on_sigterm:
             self.jit_manager = CheckpointManager(
                 trainer=trainer,
-                grace_period=trainer.args.jit_checkpoint_grace_period
+                grace_period=trainer.args.jit_checkpoint_grace_period,
             )
             self.jit_manager.setup_signal_handler()
             logger.info("JIT checkpointing enabled for Kubernetes/PyTorchJob environment")
