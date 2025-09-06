@@ -1217,11 +1217,14 @@ if __name__ == "__main__":
                 # Mismatch between available artifacts and reported jobs on github. It happens.
                 continue
 
+
+
+            artifact = retrieve_artifact(path, artifact_gpu)
+
             if "summary_short" not in artifact:
                 # The process is killed, the job is canceled, etc.
                 matrix_job_results[matrix_name]["error"] = True
 
-            artifact = retrieve_artifact(path, artifact_gpu)
             if "stats" in artifact:
                 # Link to the GitHub Action job
                 job = artifact_name_to_job_map[path]
