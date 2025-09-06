@@ -328,6 +328,9 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
 
     @slow
     def test_small_model_integration_test(self):
+
+        models = [Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", device_map="cpu") for x in range(100)]
+
         model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
 
         inputs = self.processor.apply_chat_template(
