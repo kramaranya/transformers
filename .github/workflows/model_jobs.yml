@@ -129,7 +129,7 @@ jobs:
 
       - name: Run all tests on GPU
         working-directory: /transformers
-        run: python3 -m pytest -rsfE -v --make-reports=${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports tests/${{ matrix.folders }} 2>&1 | tee test_outputs.txt
+        run: script -q -c "python3 -m pytest -rsfE -v --make-reports=${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports tests/${{ matrix.folders }}" test_outputs.txt
 
       - name: Failure short reports
         if: ${{ failure() }}
