@@ -129,7 +129,9 @@ jobs:
 
       - name: Run all tests on GPU
         working-directory: /transformers
-        run: script -q -c "python3 -m pytest -rsfE -v --make-reports=${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports tests/${{ matrix.folders }}" test_outputs.txt
+        run: |
+          script -q -c "python3 -m pytest -rsfE -v --make-reports=${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports tests/${{ matrix.folders }}" test_outputs.txt
+          ls -la
 
       - name: Failure short reports
         if: ${{ failure() }}
@@ -147,7 +149,7 @@ jobs:
           if [ -d "$TEST_REPORT_DIR" ]; then
             echo "Test report directory exists: $TEST_REPORT_DIR"
             echo "dir_exists=true" >> $GITHUB_OUTPUT
-            cp test_outputs.txt $TEST_REPORT_DIR
+            cp /transformers/test_outputs.txt $TEST_REPORT_DIR
           else
             echo "Test report directory does not exist: $TEST_REPORT_DIR"
             echo "dir_exists=false" >> $GITHUB_OUTPUT
@@ -170,7 +172,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
-          cp test_outputs.txt /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
+          cp /transformers/test_outputs.txt /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
           ls -la /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
 
       # Now `path` exists.
