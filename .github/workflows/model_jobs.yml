@@ -133,22 +133,55 @@ jobs:
 
       - name: Failure short reports
         if: ${{ failure() }}
+        # This step is only to show information on Github Actions log.
+        # Always mark this step as successful, even if the report directory or the file `failures_short.txt` in it doesn't exist
         continue-on-error: true
         run: cat /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports/failures_short.txt
 
-      - name: Run test
+      - name: Check if the test report directory exist
+        id: check_test_reports_dir
+        if: ${{ always() }}
         shell: bash
         run: |
-          mkdir -p /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
-          echo "hello" > /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports/hello.txt
-          echo "${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports"
+          TEST_REPORT_DIR="/transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports"
+          echo "Test report directory: $TEST_REPORT_DIR"
+          if [ -d "$TEST_REPORT_DIR" ]; then
+            echo "Test report directory exists: $TEST_REPORT_DIR"
+            echo "dir_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Test report directory does not exist: $TEST_REPORT_DIR"
+            echo "dir_exists=false" >> $GITHUB_OUTPUT
+          fi
 
+        # If `path` doesn't exist, we get a warning instead of failure:
+        # `No files were found with the provided path: (...). No artifacts will be uploaded.`
+        # We keep this step before the next step that creates the test report directory: because the warning would be available on the workflow run page and we can search them.
       - name: "Test suite reports artifacts: ${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ env.matrix_folders }}_test_reports"
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ env.matrix_folders }}_test_reports
           path: /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
+
+      # Create the test report directory if it doesn't exist yet, so the `notification_service` could work correctly.
+      # We also need to create at least one file, because the empty directory won't be uploaded as artifact.
+      - name: Create the test report directory if it doesn't exist yet
+        if: ${{ always() && steps.check_test_reports_dir.outputs.dir_exists == 'false' }}
+        shell: bash
+        run: |
+          mkdir -p /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
+          echo "hello" > /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports/hello.txt
+          ls -la /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports/
+
+      # Now `path` exists.
+      - name: "Test suite reports artifacts: ${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ env.matrix_folders }}_test_reports"
+        if: ${{ always() && steps.check_test_reports_dir.outputs.dir_exists == 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ env.matrix_folders }}_test_reports
+          path: /transformers/reports/${{ env.machine_type }}_${{ inputs.report_name_prefix }}_${{ matrix.folders }}_test_reports
+
+
 
   collated_reports:
     name: Collated Reports
