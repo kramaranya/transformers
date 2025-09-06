@@ -158,9 +158,11 @@ class Message:
         self.n_model_failures = (
             self.n_model_single_gpu_failures + self.n_model_multi_gpu_failures + self.n_model_unknown_failures
         )
+        self.n_model_jobs_errored_out = sum(r["error"] for r in model_results.values())
 
         # Failures and success of the additional tests
         self.n_additional_success = sum(r["success"] for r in additional_results.values())
+        self.n_additional_jobs_errored_out = sum(r["error"] for r in additional_results.values())
 
         if len(additional_results) > 0:
             # `dicts_to_sum` uses `dicts_to_sum` which requires a non empty dictionary. Let's just add an empty entry.
@@ -183,6 +185,7 @@ class Message:
         self.n_failures = self.n_model_failures + self.n_additional_failures
         self.n_success = self.n_model_success + self.n_additional_success
         self.n_tests = self.n_failures + self.n_success
+        self.n_jobs_errored_out = self.n_model_jobs_errored_out + self.n_additional_jobs_errored_out
 
         self.model_results = model_results
         self.additional_results = additional_results
@@ -241,6 +244,7 @@ class Message:
                 "type": "plain_text",
                 "text": (
                     f"There were {self.n_failures} failures, out of {self.n_tests} tests.\n"
+                    f"There were {self.n_jobs_errored_out} jobs errored out without producing expected output files.\n"
                     f"The suite ran in {self.time}."
                 ),
                 "emoji": True,
@@ -561,7 +565,7 @@ class Message:
         if self.ci_title:
             blocks.append(self.ci_title_section)
 
-        if self.n_model_failures > 0 or self.n_additional_failures > 0:
+        if self.n_model_failures > 0 or self.n_additional_failures > 0 or self.n_jobs_errored_out:
             blocks.append(self.failures)
 
         if self.n_model_failures > 0:
@@ -1194,6 +1198,7 @@ if __name__ == "__main__":
             "success": 0,
             "skipped": 0,
             "time_spent": [],
+            "error": False,
             "failures": {},
             "job_link": {},
         }
@@ -1225,57 +1230,61 @@ if __name__ == "__main__":
 
                 stacktraces = handle_stacktraces(artifact["failures_line"])
 
-                # TODO: ???
-                for line in artifact["summary_short"].split("\n"):
-                    if line.startswith("FAILED "):
-                        # Avoid the extra `FAILED` entry given by `run_test_using_subprocess` causing issue when calling
-                        # `stacktraces.pop` below.
-                        # See `run_test_using_subprocess` in `src/transformers/testing_utils.py`
-                        if " - Failed: (subprocess)" in line:
-                            continue
-                        line = line[len("FAILED ") :]
-                        line = line.split()[0].replace("\n", "")
+                if "summary_short" not in artifact:
+                    # The process is killed, the job is canceled, etc.
+                    matrix_job_results[matrix_name]["error"] = True
+                else:
+                    # TODO: ???
+                    for line in artifact["summary_short"].split("\n"):
+                        if line.startswith("FAILED "):
+                            # Avoid the extra `FAILED` entry given by `run_test_using_subprocess` causing issue when calling
+                            # `stacktraces.pop` below.
+                            # See `run_test_using_subprocess` in `src/transformers/testing_utils.py`
+                            if " - Failed: (subprocess)" in line:
+                                continue
+                            line = line[len("FAILED ") :]
+                            line = line.split()[0].replace("\n", "")
 
-                        if artifact_gpu not in matrix_job_results[matrix_name]["failures"]:
-                            matrix_job_results[matrix_name]["failures"][artifact_gpu] = []
+                            if artifact_gpu not in matrix_job_results[matrix_name]["failures"]:
+                                matrix_job_results[matrix_name]["failures"][artifact_gpu] = []
 
-                        trace = pop_default(stacktraces, 0, "Cannot retrieve error message.")
-                        matrix_job_results[matrix_name]["failures"][artifact_gpu].append(
-                            {"line": line, "trace": trace}
-                        )
+                            trace = pop_default(stacktraces, 0, "Cannot retrieve error message.")
+                            matrix_job_results[matrix_name]["failures"][artifact_gpu].append(
+                                {"line": line, "trace": trace}
+                            )
 
-                        # TODO: How to deal wit this
+                            # TODO: How to deal wit this
 
-                        if re.search("tests/quantization", line):
-                            matrix_job_results[matrix_name]["failed"]["Quantization"][artifact_gpu] += 1
+                            if re.search("tests/quantization", line):
+                                matrix_job_results[matrix_name]["failed"]["Quantization"][artifact_gpu] += 1
 
-                        elif re.search("test_modeling_tf_", line):
-                            matrix_job_results[matrix_name]["failed"]["TensorFlow"][artifact_gpu] += 1
+                            elif re.search("test_modeling_tf_", line):
+                                matrix_job_results[matrix_name]["failed"]["TensorFlow"][artifact_gpu] += 1
 
-                        elif re.search("test_modeling_flax_", line):
-                            matrix_job_results[matrix_name]["failed"]["Flax"][artifact_gpu] += 1
+                            elif re.search("test_modeling_flax_", line):
+                                matrix_job_results[matrix_name]["failed"]["Flax"][artifact_gpu] += 1
 
-                        elif re.search("test_modeling", line):
-                            matrix_job_results[matrix_name]["failed"]["PyTorch"][artifact_gpu] += 1
+                            elif re.search("test_modeling", line):
+                                matrix_job_results[matrix_name]["failed"]["PyTorch"][artifact_gpu] += 1
 
-                        elif re.search("test_tokenization", line):
-                            matrix_job_results[matrix_name]["failed"]["Tokenizers"][artifact_gpu] += 1
+                            elif re.search("test_tokenization", line):
+                                matrix_job_results[matrix_name]["failed"]["Tokenizers"][artifact_gpu] += 1
 
-                        elif re.search("test_pipelines", line):
-                            matrix_job_results[matrix_name]["failed"]["Pipelines"][artifact_gpu] += 1
+                            elif re.search("test_pipelines", line):
+                                matrix_job_results[matrix_name]["failed"]["Pipelines"][artifact_gpu] += 1
 
-                        elif re.search("test_trainer", line):
-                            matrix_job_results[matrix_name]["failed"]["Trainer"][artifact_gpu] += 1
+                            elif re.search("test_trainer", line):
+                                matrix_job_results[matrix_name]["failed"]["Trainer"][artifact_gpu] += 1
 
-                        elif re.search("onnx", line):
-                            matrix_job_results[matrix_name]["failed"]["ONNX"][artifact_gpu] += 1
+                            elif re.search("onnx", line):
+                                matrix_job_results[matrix_name]["failed"]["ONNX"][artifact_gpu] += 1
 
-                        elif re.search("auto", line):
-                            matrix_job_results[matrix_name]["failed"]["Auto"][artifact_gpu] += 1
+                            elif re.search("auto", line):
+                                matrix_job_results[matrix_name]["failed"]["Auto"][artifact_gpu] += 1
 
-                        else:
-                            matrix_job_results[matrix_name]["failed"]["Unclassified"][artifact_gpu] += 1
-                            unclassified_model_failures.append(line)
+                            else:
+                                matrix_job_results[matrix_name]["failed"]["Unclassified"][artifact_gpu] += 1
+                                unclassified_model_failures.append(line)
 
     # Additional runs
     additional_files = {
