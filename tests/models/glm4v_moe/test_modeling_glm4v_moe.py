@@ -25,6 +25,7 @@ from transformers import (
     is_torch_available,
 )
 from transformers.testing_utils import (
+    cleanup,
     require_flash_attn,
     require_torch,
     require_torch_gpu,
@@ -295,7 +296,23 @@ class Glm4vMoeModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCa
 
 @require_torch
 class Glm4vMoeIntegrationTest(unittest.TestCase):
+    model = None
+
+    @classmethod
+    def setUpClass(cls):
+        cleanup(torch_device, gc_collect=True)
+        cls.model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+
+    def get_model(self):
+        return self.model
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.model
+        cleanup(torch_device, gc_collect=True)
+
     def setUp(self):
+        cleanup(torch_device, gc_collect=True)
         self.processor = AutoProcessor.from_pretrained("zai-org/GLM-4.5V")
         self.message = [
             {
@@ -323,12 +340,11 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ]
 
     def tearDown(self):
-        gc.collect()
-        torch.cuda.empty_cache()
+        cleanup(torch_device, gc_collect=True)
 
     @slow
     def test_small_model_integration_test(self):
-        model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        model = self.get_model()
 
         inputs = self.processor.apply_chat_template(
             self.message, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
@@ -353,7 +369,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         # verify generation
         inputs = inputs.to(torch_device)
 
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
         EXPECTED_DECODED_TEXT = "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks"
         self.assertEqual(
             self.processor.decode(output[0], skip_special_tokens=True),
@@ -362,14 +378,14 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
 
     @slow
     def test_small_model_integration_test_batch(self):
-        model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        model = self.get_model()
         batch_messages = [self.message] * 2
         inputs = self.processor.apply_chat_template(
             batch_messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -383,9 +399,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
     @slow
     def test_small_model_integration_test_with_video(self):
         processor = AutoProcessor.from_pretrained("zai-org/GLM-4.5V", max_image_size={"longest_edge": 50176})
-        model = Glm4vMoeForConditionalGeneration.from_pretrained(
-            "zai-org/GLM-4.5V", dtype=torch.float16, device_map="auto"
-        )
+        model = self.get_model()
         questions = ["Describe this video."] * 2
         video_urls = [
             "https://huggingface.co/datasets/hf-internal-testing/fixtures_videos/resolve/main/tennis.mp4"
@@ -408,7 +422,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         inputs = processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt", padding=True
         ).to(torch_device)
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
         EXPECTED_DECODED_TEXT = [
             "\n012345Describe this video.\n<think>Got it, let's analyze the video. First, the scene is a room with a wooden floor, maybe a traditional Japanese room with tatami",
             "\n012345Describe this video.\n<think>Got it, let's analyze the video. First, the scene is a room with a wooden floor, maybe a traditional Japanese room with tatami"
@@ -420,12 +434,12 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
 
     @slow
     def test_small_model_integration_test_expand(self):
-        model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        model = self.get_model()
         inputs = self.processor.apply_chat_template(
             self.message, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         ).to(torch_device)
 
-        output = model.generate(**inputs, max_new_tokens=30, do_sample=False, num_beams=2, num_return_sequences=2)
+        output = model.generate(**inputs, max_new_tokens=5, do_sample=False, num_beams=2, num_return_sequences=2)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture doesn't look like a dog; it's actually a cat. Specifically",
@@ -438,7 +452,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
 
     @slow
     def test_small_model_integration_test_batch_wo_image(self):
-        model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        model = self.get_model()
         message_wo_image = [
             {"role": "user", "content": [{"type": "text", "text": "Who are you?"}]},
         ]
@@ -453,7 +467,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -466,7 +480,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
 
     @slow
     def test_small_model_integration_test_batch_different_resolutions(self):
-        model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        model = self.get_model()
         batched_messages = [self.message, self.message2]
         inputs = self.processor.apply_chat_template(
             batched_messages,
@@ -478,7 +492,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -510,7 +524,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture has a stocky build, thick fur, and a face that's",
@@ -545,7 +559,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=30)
+        output = model.generate(**inputs, max_new_tokens=5)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
