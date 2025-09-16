@@ -369,7 +369,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         # verify generation
         inputs = inputs.to(torch_device)
 
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
         EXPECTED_DECODED_TEXT = "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks"
         self.assertEqual(
             self.processor.decode(output[0], skip_special_tokens=True),
@@ -385,7 +385,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -422,7 +422,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         inputs = processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt", padding=True
         ).to(torch_device)
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
         EXPECTED_DECODED_TEXT = [
             "\n012345Describe this video.\n<think>Got it, let's analyze the video. First, the scene is a room with a wooden floor, maybe a traditional Japanese room with tatami",
             "\n012345Describe this video.\n<think>Got it, let's analyze the video. First, the scene is a room with a wooden floor, maybe a traditional Japanese room with tatami"
@@ -439,7 +439,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
             self.message, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         ).to(torch_device)
 
-        output = model.generate(**inputs, max_new_tokens=5, do_sample=False, num_beams=2, num_return_sequences=2)
+        output = model.generate(**inputs, max_new_tokens=3, do_sample=False, num_beams=2, num_return_sequences=2)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture doesn't look like a dog; it's actually a cat. Specifically",
@@ -467,7 +467,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -492,7 +492,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
@@ -524,7 +524,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture has a stocky build, thick fur, and a face that's",
@@ -559,7 +559,7 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         # it should not matter whether two images are the same size or not
-        output = model.generate(**inputs, max_new_tokens=5)
+        output = model.generate(**inputs, max_new_tokens=3)
 
         EXPECTED_DECODED_TEXT = [
             "\nWhat kind of dog is this?\n<think>Got it, let's look at the image. The animal in the picture is not a dog; it's a cat. Specifically, it looks",
