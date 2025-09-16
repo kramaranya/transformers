@@ -14,7 +14,6 @@
 """Testing suite for the PyTorch GLM-4.1V model."""
 
 import copy
-import gc
 import unittest
 
 from transformers import (
@@ -301,7 +300,9 @@ class Glm4vMoeIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cleanup(torch_device, gc_collect=True)
-        cls.model = Glm4vMoeForConditionalGeneration.from_pretrained("zai-org/GLM-4.5V", dtype="auto", device_map="auto")
+        cls.model = Glm4vMoeForConditionalGeneration.from_pretrained(
+            "zai-org/GLM-4.5V", dtype="auto", device_map="auto"
+        )
 
     def get_model(self):
         return self.model
