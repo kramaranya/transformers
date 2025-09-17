@@ -1365,6 +1365,11 @@ class MLflowCallback(TrainerCallback):
         self._auto_end_run = False
         self._log_artifacts = False
         self._ml_flow = mlflow
+        # Child-run per checkpoint controls
+        self._child_runs = False
+        self._register_ckpts_model_name = None
+        self._parent_run_id = None
+        self._logged_child_steps = set()
 
     def setup(self, args, state, model):
         """
@@ -1399,6 +1404,9 @@ class MLflowCallback(TrainerCallback):
             Set the maximum number of parameters to log in the run.
         """
         self._log_artifacts = os.getenv("HF_MLFLOW_LOG_ARTIFACTS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
+        # New env toggles for child runs per checkpoint
+        self._child_runs = os.getenv("HF_MLFLOW_CHILD_RUNS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
+        self._register_ckpts_model_name = os.getenv("HF_MLFLOW_REGISTER_CKPTS", None)
         self._nested_run = os.getenv("MLFLOW_NESTED_RUN", "FALSE").upper() in ENV_VARS_TRUE_VALUES
         self._tracking_uri = os.getenv("MLFLOW_TRACKING_URI", None)
         self._experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", None)
@@ -1435,6 +1443,9 @@ class MLflowCallback(TrainerCallback):
                 self._ml_flow.start_run(run_name=args.run_name, nested=self._nested_run)
                 logger.debug(f"MLflow run started with run_id={self._ml_flow.active_run().info.run_id}")
                 self._auto_end_run = True
+            # Remember parent run id (used for nested child runs)
+            if self._ml_flow.active_run() is not None:
+                self._parent_run_id = self._ml_flow.active_run().info.run_id
             combined_dict = args.to_dict()
             if hasattr(model, "config") and model.config is not None:
                 model_config = model.config.to_dict()
@@ -1507,15 +1518,76 @@ class MLflowCallback(TrainerCallback):
                 self._ml_flow.end_run()
 
     def on_save(self, args, state, control, **kwargs):
-        if self._initialized and state.is_world_process_zero and self._log_artifacts:
-            ckpt_dir = f"checkpoint-{state.global_step}"
-            artifact_path = os.path.join(args.output_dir, ckpt_dir)
-            logger.info(f"Logging checkpoint artifacts in {ckpt_dir}. This may take time.")
-            self._ml_flow.pyfunc.log_model(
-                ckpt_dir,
-                artifacts={"model_path": artifact_path},
-                python_model=self._ml_flow.pyfunc.PythonModel(),
-            )
+        if not (self._initialized and state.is_world_process_zero):
+            return
+
+        # Resolve checkpoint directory name. Trainer saves as checkpoint-{global_step}
+        step = int(state.global_step) if state.global_step is not None else None
+        ckpt_dir_name = f"checkpoint-{step}" if step is not None else None
+        artifact_path = None
+
+        if ckpt_dir_name is not None:
+            candidate = os.path.join(args.output_dir, ckpt_dir_name)
+            if os.path.isdir(candidate):
+                artifact_path = candidate
+            else:
+                # Fallback: find latest checkpoint folder
+                try:
+                    ckpts = [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")]
+                    if ckpts:
+                        last = sorted(ckpts, key=lambda d: int(d.split("-")[-1]))[-1]
+                        artifact_path = os.path.join(args.output_dir, last)
+                except Exception:
+                    artifact_path = None
+
+        # Behavior A: Create a child (nested) run per checkpoint when enabled
+        if self._child_runs and self._parent_run_id is not None and step is not None and step not in self._logged_child_steps:
+            try:
+                with self._ml_flow.start_run(nested=True, run_name=f"checkpoint-{step}") as child_run:
+                    # Link to parent and checkpoint metadata
+                    self._ml_flow.set_tag("parent_run_id", self._parent_run_id)
+                    self._ml_flow.set_tag("checkpoint_step", step)
+                    if state.epoch is not None:
+                        self._ml_flow.set_tag("epoch", f"{float(state.epoch):.6f}")
+
+                    # Log last-known metrics from log_history
+                    if getattr(state, "log_history", None):
+                        last = state.log_history[-1]
+                        metrics = {k: float(v) for k, v in last.items() if isinstance(v, (int, float))}
+                        if metrics:
+                            self._ml_flow.log_metrics(metrics, step=step)
+
+                    # Log artifacts for the checkpoint if available
+                    if artifact_path and os.path.isdir(artifact_path):
+                        logger.info(f"Logging checkpoint artifacts for child run at {artifact_path}. This may take time.")
+                        self._ml_flow.log_artifacts(artifact_path, artifact_path="model")
+
+                    # Optional: register each checkpoint as a model version
+                    if self._register_ckpts_model_name:
+                        try:
+                            self._ml_flow.register_model(
+                                f"runs:/{child_run.info.run_id}/model",
+                                self._register_ckpts_model_name,
+                            )
+                        except Exception:
+                            pass
+
+                self._logged_child_steps.add(step)
+            except Exception:
+                # Do not fail training on MLflow child run issues
+                pass
+
+        # Behavior B: legacy artifact logging on the parent run when enabled
+        elif self._log_artifacts and artifact_path:
+            try:
+                logger.info(f"Logging checkpoint artifacts in {os.path.basename(artifact_path)}. This may take time.")
+                self._ml_flow.pyfunc.log_model(
+                    os.path.basename(artifact_path),
+                    artifacts={"model_path": artifact_path},
+                    python_model=self._ml_flow.pyfunc.PythonModel(),
+                )
+            except Exception:
+                pass
 
     def __del__(self):
         # if the previous run is not terminated correctly, the fluent API will
