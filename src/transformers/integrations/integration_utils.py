@@ -1561,6 +1561,7 @@ class MLflowCallback(TrainerCallback):
         # Behavior A: Create a child (nested) run per checkpoint when enabled
         if self._child_runs and self._parent_run_id is not None and step is not None and step not in self._logged_child_steps:
             # Use context manager, but guard each operation so exceptions don't mark run FAILED
+            child_run_id_for_registration = None
             with self._ml_flow.start_run(nested=True, run_name=f"checkpoint-{step}") as child_run:
                 try:
                     # Link to parent and checkpoint metadata
@@ -1612,8 +1613,11 @@ class MLflowCallback(TrainerCallback):
                 model_name_to_register = self._register_ckpts_model_name or self._ckpt_model_name_default
                 if model_name_to_register:
                     try:
+                        # capture run id; some stores require post-close registration
+                        child_run_id_for_registration = child_run.info.run_id
+                        # try immediate registration first
                         self._ml_flow.register_model(
-                            f"runs:/{child_run.info.run_id}/model",
+                            f"runs:/{child_run_id_for_registration}/model",
                             model_name_to_register,
                         )
                         try:
@@ -1621,10 +1625,24 @@ class MLflowCallback(TrainerCallback):
                         except Exception:
                             pass
                     except Exception:
+                        # will retry after closing below
                         pass
 
             self._logged_child_steps.add(step)
             self._last_child_logged_step = step
+
+            # Retry registration after run is closed if needed
+            if model_name_to_register and child_run_id_for_registration:
+                try:
+                    from mlflow.tracking import MlflowClient
+                    client = MlflowClient()
+                    client.create_model_version(
+                        name=model_name_to_register,
+                        source=f"runs:/{child_run_id_for_registration}/model",
+                        run_id=child_run_id_for_registration,
+                    )
+                except Exception:
+                    pass
 
         # Behavior B: legacy artifact logging on the parent run when enabled
         elif self._log_artifacts and artifact_path:
