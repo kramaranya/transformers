@@ -1372,6 +1372,7 @@ class MLflowCallback(TrainerCallback):
         self._logged_child_steps = set()
         self._last_child_logged_step = -1
         self._child_log_history = True
+        self._ckpt_model_name_default = None
 
     def setup(self, args, state, model):
         """
@@ -1407,7 +1408,8 @@ class MLflowCallback(TrainerCallback):
         """
         self._log_artifacts = os.getenv("HF_MLFLOW_LOG_ARTIFACTS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
         # New env toggles for child runs per checkpoint
-        self._child_runs = os.getenv("HF_MLFLOW_CHILD_RUNS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
+        # Default to enabled for child runs and history logging unless explicitly disabled
+        self._child_runs = os.getenv("HF_MLFLOW_CHILD_RUNS", "TRUE").upper() in ENV_VARS_TRUE_VALUES
         self._child_log_history = os.getenv("HF_MLFLOW_CHILD_LOG_HISTORY", "TRUE").upper() in ENV_VARS_TRUE_VALUES
         self._register_ckpts_model_name = os.getenv("HF_MLFLOW_REGISTER_CKPTS", None)
         self._nested_run = os.getenv("MLFLOW_NESTED_RUN", "FALSE").upper() in ENV_VARS_TRUE_VALUES
@@ -1449,6 +1451,19 @@ class MLflowCallback(TrainerCallback):
             # Remember parent run id (used for nested child runs)
             if self._ml_flow.active_run() is not None:
                 self._parent_run_id = self._ml_flow.active_run().info.run_id
+                # compute a default model name for checkpoint registration when not provided
+                try:
+                    default_name = None
+                    if getattr(model, "name_or_path", None):
+                        # keep it short / registry friendly
+                        default_name = os.path.basename(str(model.name_or_path)).replace("/", "-")
+                    if not default_name and getattr(args, "run_name", None):
+                        default_name = f"{args.run_name}-checkpoint"
+                    if not default_name:
+                        default_name = "checkpoint-model"
+                    self._ckpt_model_name_default = default_name
+                except Exception:
+                    self._ckpt_model_name_default = "checkpoint-model"
             combined_dict = args.to_dict()
             if hasattr(model, "config") and model.config is not None:
                 model_config = model.config.to_dict()
@@ -1594,12 +1609,17 @@ class MLflowCallback(TrainerCallback):
                         pass
 
                 # Optional: register each checkpoint as a model version
-                if self._register_ckpts_model_name:
+                model_name_to_register = self._register_ckpts_model_name or self._ckpt_model_name_default
+                if model_name_to_register:
                     try:
                         self._ml_flow.register_model(
                             f"runs:/{child_run.info.run_id}/model",
-                            self._register_ckpts_model_name,
+                            model_name_to_register,
                         )
+                        try:
+                            self._ml_flow.set_tag("registered_model_name", model_name_to_register)
+                        except Exception:
+                            pass
                     except Exception:
                         pass
 
