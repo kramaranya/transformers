@@ -1370,6 +1370,8 @@ class MLflowCallback(TrainerCallback):
         self._register_ckpts_model_name = None
         self._parent_run_id = None
         self._logged_child_steps = set()
+        self._last_child_logged_step = -1
+        self._child_log_history = True
 
     def setup(self, args, state, model):
         """
@@ -1406,6 +1408,7 @@ class MLflowCallback(TrainerCallback):
         self._log_artifacts = os.getenv("HF_MLFLOW_LOG_ARTIFACTS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
         # New env toggles for child runs per checkpoint
         self._child_runs = os.getenv("HF_MLFLOW_CHILD_RUNS", "FALSE").upper() in ENV_VARS_TRUE_VALUES
+        self._child_log_history = os.getenv("HF_MLFLOW_CHILD_LOG_HISTORY", "TRUE").upper() in ENV_VARS_TRUE_VALUES
         self._register_ckpts_model_name = os.getenv("HF_MLFLOW_REGISTER_CKPTS", None)
         self._nested_run = os.getenv("MLFLOW_NESTED_RUN", "FALSE").upper() in ENV_VARS_TRUE_VALUES
         self._tracking_uri = os.getenv("MLFLOW_TRACKING_URI", None)
@@ -1542,40 +1545,66 @@ class MLflowCallback(TrainerCallback):
 
         # Behavior A: Create a child (nested) run per checkpoint when enabled
         if self._child_runs and self._parent_run_id is not None and step is not None and step not in self._logged_child_steps:
-            try:
-                with self._ml_flow.start_run(nested=True, run_name=f"checkpoint-{step}") as child_run:
+            # Use context manager, but guard each operation so exceptions don't mark run FAILED
+            with self._ml_flow.start_run(nested=True, run_name=f"checkpoint-{step}") as child_run:
+                try:
                     # Link to parent and checkpoint metadata
                     self._ml_flow.set_tag("parent_run_id", self._parent_run_id)
                     self._ml_flow.set_tag("checkpoint_step", step)
                     if state.epoch is not None:
                         self._ml_flow.set_tag("epoch", f"{float(state.epoch):.6f}")
+                except Exception:
+                    pass
 
-                    # Log last-known metrics from log_history
-                    if getattr(state, "log_history", None):
-                        last = state.log_history[-1]
-                        metrics = {k: float(v) for k, v in last.items() if isinstance(v, (int, float))}
-                        if metrics:
-                            self._ml_flow.log_metrics(metrics, step=step)
+                # Log metrics history slice between last checkpoint and this checkpoint
+                if self._child_log_history and getattr(state, "log_history", None):
+                    try:
+                        start = self._last_child_logged_step if self._last_child_logged_step is not None else -1
+                        for entry in state.log_history:
+                            entry_step = entry.get("step") or entry.get("global_step")
+                            if entry_step is None:
+                                continue
+                            if not (start < int(entry_step) <= step):
+                                continue
+                            metrics = {k: float(v) for k, v in entry.items() if isinstance(v, (int, float))}
+                            if metrics:
+                                # Ensure we pass sanitized metric names as in on_log
+                                self._ml_flow.log_metrics(metrics=metrics, step=int(entry_step))
+                    except Exception:
+                        pass
+                else:
+                    # Fallback: log last-known metrics as a single point
+                    try:
+                        if getattr(state, "log_history", None):
+                            last = state.log_history[-1]
+                            metrics = {k: float(v) for k, v in last.items() if isinstance(v, (int, float))}
+                            if metrics:
+                                self._ml_flow.log_metrics(metrics=metrics, step=step)
+                    except Exception:
+                        pass
 
-                    # Log artifacts for the checkpoint if available
-                    if artifact_path and os.path.isdir(artifact_path):
-                        logger.info(f"Logging checkpoint artifacts for child run at {artifact_path}. This may take time.")
+                # Log artifacts for the checkpoint if available
+                if artifact_path and os.path.isdir(artifact_path):
+                    try:
+                        logger.info(
+                            f"Logging checkpoint artifacts for child run at {artifact_path}. This may take time."
+                        )
                         self._ml_flow.log_artifacts(artifact_path, artifact_path="model")
+                    except Exception:
+                        pass
 
-                    # Optional: register each checkpoint as a model version
-                    if self._register_ckpts_model_name:
-                        try:
-                            self._ml_flow.register_model(
-                                f"runs:/{child_run.info.run_id}/model",
-                                self._register_ckpts_model_name,
-                            )
-                        except Exception:
-                            pass
+                # Optional: register each checkpoint as a model version
+                if self._register_ckpts_model_name:
+                    try:
+                        self._ml_flow.register_model(
+                            f"runs:/{child_run.info.run_id}/model",
+                            self._register_ckpts_model_name,
+                        )
+                    except Exception:
+                        pass
 
-                self._logged_child_steps.add(step)
-            except Exception:
-                # Do not fail training on MLflow child run issues
-                pass
+            self._logged_child_steps.add(step)
+            self._last_child_logged_step = step
 
         # Behavior B: legacy artifact logging on the parent run when enabled
         elif self._log_artifacts and artifact_path:
